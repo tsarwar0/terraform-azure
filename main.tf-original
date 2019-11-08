@@ -1,0 +1,252 @@
+variable "subscription_id" {}
+variable "resource_group_name" {}
+variable "location" {}
+variable "resource_prefix" {}
+variable "env_name" {}
+
+locals {
+  resource_name="${var.resource_prefix}-${var.env_name}"
+}
+
+
+provider "azurerm" {
+  version         = "1.24.0"
+  subscription_id = "${var.subscription_id}"
+}
+
+/******************Setup Virtual Network**************/
+module "main_vnet" {
+  source ="./modules/virtualnetwork"
+  
+  vnet_name           = "${local.resource_name}-vnet"
+  vnet_location       = "${var.location}"
+  vnet_resource_group = "${var.resource_group_name}"
+  vnet_address_space  = "10.0.0.0/16"
+}
+
+/******************Setup Management Subnet***********************/
+module "subnet_management" {
+  source = "./modules/subnet"
+
+    subnet_name           = "${local.resource_name}-mgmt-subnet"
+    resource_group_name   = "${var.resource_group_name}"
+    address_space         = "10.0.1.0/24"
+    virtual_network_name  = "${module.main_vnet.virtual_network_name}"
+}
+
+/******************Setup Public Subnet **************************/
+module "subnet_public"{
+   source = "./modules/subnet"
+
+    subnet_name           = "${local.resource_name}-pub-subnet"
+    resource_group_name   = "${var.resource_group_name}"
+    address_space         = "10.0.2.0/24"
+    virtual_network_name  = "${module.main_vnet.virtual_network_name}"
+ }
+
+/*******************Setup Application Subnet ********************/
+
+module "subnet_application"{
+  source = "./modules/subnet"
+
+    subnet_name           = "${local.resource_name}-app-subnet"
+    resource_group_name   = "${var.resource_group_name}"
+    address_space         = "10.0.3.0/24"
+    virtual_network_name  = "${module.main_vnet.virtual_network_name}"
+}
+
+
+/*******************Setup Database Subnet ***********************/
+ module "subnet_database"{
+  source = "./modules/subnet"
+
+    subnet_name           = "${local.resource_name}-db-subnet"
+    resource_group_name   = "${var.resource_group_name}"
+    address_space         = "10.0.4.0/24"
+    virtual_network_name  = "${module.main_vnet.virtual_network_name}"
+}
+
+/********************Setup NSG for servers ***********************/
+module "mgmt_server_nsg" {
+  source = "./modules/network_sec_group"
+
+  nsg_name = "${local.resource_name}-mgmt-nsg"
+  nsg_location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  source_port_range = "*"
+  destination_port_range = "*"
+  source_address_prefix = "*"
+  destination_address_prefix = "*"
+}
+
+module "app_server_nsg" {
+  source = "./modules/network_sec_group"
+
+  nsg_name = "${local.resource_name}-app-nsg"
+  nsg_location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  source_port_range = "*"
+  destination_port_range = "*"
+  source_address_prefix = "*"
+  destination_address_prefix = "*"
+}
+module "public_server_nsg" {
+  source = "./modules/network_sec_group"
+
+  nsg_name = "${local.resource_name}-pub-nsg"
+  nsg_location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  source_port_range = "*"
+  destination_port_range = "*"
+  source_address_prefix = "*"
+  destination_address_prefix = "*"
+}
+module "db_server_nsg" {
+  source = "./modules/network_sec_group"
+
+  nsg_name = "${local.resource_name}-db-nsg"
+  nsg_location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  source_port_range = "*"
+  destination_port_range = "*"
+  source_address_prefix = "*"
+  destination_address_prefix = "*"
+}
+
+/******************* Virtual Machine **********************/
+
+//////*****NOTE: The following demonstrates packaging the VM and using modules within  Module****////
+///// To Use this dmeonstration . Please do the following steps://////
+///// 1) Uncomment the code below and comment the section below.
+///// 2) Under modules/virtual_machine . Rename virtual_machine.tf_4mod -> virtual_machine.tf
+///// 3) Rename virtual_machine_res.tf -> virtual_machine_res.tf_4res
+
+module "management_server" {
+  source = "./modules/server"
+
+  vm_name = "${local.resource_name}-mgmt-vm"
+  location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  vm_tag_name = "${local.resource_name}-mgmt-vm"
+  os_profile_computer_name = "${local.resource_name}-mgmtsrvr"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "${local.resource_name}-mgmt-osdisk"
+  virtual_machine_nic_subnet_id ="${module.subnet_management.subnet_id}"
+  network_security_group_id = "${module.mgmt_server_nsg.nsg_id}"
+  enable_public_ip =1
+  public_ip_name = "${local.resource_name}-mgmt-public-ip"
+  nic_name ="${local.resource_name}-mgmt-nic"
+}
+
+module "application_server" {
+  source = "./modules/server"
+
+
+  vm_name = "${local.resource_name}-app-vm"
+  location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  vm_tag_name = "${local.resource_name}-app-vm"
+  os_profile_computer_name = "${local.resource_name}-appsrvr"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "${local.resource_name}-app-osdisk"
+  virtual_machine_nic_subnet_id ="${module.subnet_application.subnet_id}"
+  network_security_group_id = "${module.app_server_nsg.nsg_id}"
+  enable_public_ip =0
+  public_ip_name = ""         //Set with an empty string if not setting public ip as it complains.
+  nic_name ="${local.resource_name}-app-nic"
+}
+
+module "database_server" {
+  source = "./modules/server"
+
+  vm_name = "${local.resource_name}-db-vm"
+  location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  vm_tag_name = "${local.resource_name}-db-vm"
+  os_profile_computer_name = "${local.resource_name}-dbsrvr"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "${local.resource_name}-db-osdisk"
+  virtual_machine_nic_subnet_id ="${module.subnet_database.subnet_id}"
+  network_security_group_id = "${module.db_server_nsg.nsg_id}"
+  enable_public_ip =0
+  public_ip_name = ""         //Set with an empty string if not setting public ip as it complains.
+  nic_name ="${local.resource_name}-db-nic"
+}
+
+module "public_server" {
+  source = "./modules/server"
+
+  vm_name = "${local.resource_name}-pub-vm"
+  location = "${var.location}"
+  resource_group_name = "${var.resource_group_name}"
+  vm_tag_name = "${local.resource_name}-public-vm"
+  os_profile_computer_name = "${local.resource_name}-pubsrvr"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "${local.resource_name}-pub-osdisk"
+  virtual_machine_nic_subnet_id ="${module.subnet_public.subnet_id}"
+  network_security_group_id = "${module.public_server_nsg.nsg_id}"
+  enable_public_ip =1
+  public_ip_name = "${local.resource_name}-pub-ip"         //Set with an empty string if not setting public ip as it complains.
+  nic_name ="${local.resource_name}-pub-nic"
+}
+
+
+////*******NOTE : The following demonstrates  packaging VM and uses resources within a module *******/////
+
+/*
+module "management_server" {
+  source = "./modules/virtual_machine"
+
+  vm_name = "management_vm"
+  vm_location = "${var.location}"
+  vm_resource_group_name = "${var.resource_group_name}"
+  vm_tag_name = "management_vm"
+  os_profile_computer_name = "mgmtvm"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "mgmt_srvr_osdisk"
+  subnet_id ="${module.subnet_management.subnet_id}"
+  network_security_group_id = "${module.mgmt_nsg.nsg_id}"
+  enable_public_ip =0
+}*/
+
+
+/****************** Public Virtual Machine **************************/
+
+
+/*module "virtual_machine_appsrvr" {
+  source = "./modules/virtual_machine"
+
+  vm_name = "app_server_vm"
+  vm_location = "${var.location}"
+  vm_resource_group_name = "${var.resource_group_name}"
+  network_interface_ids  = ["${module.appsrvr_nic.module_nic_id}"] //move this inside
+  vm_tag_name = "app_server_vm"
+  os_profile_computer_name = "appsrvrvm"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "app_srvr_osdisk"
+
+}*/
+
+/******************* Database Server VM ****************************/
+
+/*
+module "virtual_machine_database" {
+  source = "./modules/virtual_machine"
+
+  vm_name = "db_server_vm"
+  vm_location = "${var.location}"
+  vm_resource_group_name = "${var.resource_group_name}"
+  network_interface_ids  = ["${module.db_server_nic.module_nic_id}"]
+  vm_tag_name = "dbsrver_vm"
+  os_profile_computer_name = "dbvm"
+  os_profile_admin_username = "testadmin"
+  os_profile_admin_password = "Password1234!"
+  storage_os_disk_name = "db_srvr_osdisk"
+
+}*/
